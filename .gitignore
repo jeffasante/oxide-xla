@@ -45,7 +45,9 @@ venv.bak/
 
 # Data / Output
 *.onnx
-!web/deit.onnx
+!docs/deit.onnx
+*.data
+*.bin
 *.pth
 *.pt
 tests/models/
