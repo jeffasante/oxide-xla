@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OxideXLA | ONNX to JAX</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&family=Gaegu&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+    <style>
+        :root {
+            --bg: #fff;
+            --text: #111;
+            --text-muted: #666;
+            --accent: #f8f9fa;
+            --eee: #eee;
+            --card-width: 680px;
+            --card-expanded-width: 1000px;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--accent);
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            overflow-x: hidden;
+        }
+
+        /* Smooth Scrollbars */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #ccc; }
+
+        .main-card {
+            background: white;
+            border-radius: 32px;
+            padding: 40px;
+            width: 100%;
+            max-width: var(--card-width);
+            max-height: 94vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 40px 100px -20px rgba(0,0,0,0.08);
+            position: relative;
+            transition: max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            overflow: hidden;
+        }
+
+        .main-card.expanded { max-width: var(--card-expanded-width); }
+
+        .card-scroll-area {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding-right: 10px;
+            margin-right: -10px;
+        }
+
+        .main-card.fullscreen {
+            position: fixed;
+            top: 20px; left: 20px; right: 20px; bottom: 20px;
+            max-width: none;
+            max-height: none;
+            z-index: 1000;
+        }
+
+        .large-o { font-size: 50px; font-weight: 800; line-height: 1; margin-bottom: 20px; }
+        .gaegu { font-family: 'Gaegu', cursive; }
+        .you-header { letter-spacing: 0.12em; font-size: 11px; font-weight: 700; color: #aaa; margin-bottom: 4px; }
+
+        .pill-btn {
+            background: #e5e5e5;
+            color: #111;
+            border-radius: 999px;
+            padding: 10px 24px;
+            font-family: 'Gaegu', cursive;
+            font-size: 16px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+            border: none;
+            cursor: pointer;
+        }
+
+        .pill-btn:hover { background: #d5d5d5; transform: scale(1.02); }
+
+        .panel-container {
+            background: #fafafa;
+            border-radius: 20px;
+            padding: 16px;
+            border: 1px solid var(--eee);
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            min-height: 480px;
+        }
+
+        #codePre, #asciiPre {
+            font-family: ui-monospace, monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            margin: 0;
+            padding: 16px;
+            background: white;
+            border-radius: 12px;
+            border: 1px solid #eee;
+            overflow: auto;
+            flex-grow: 1;
+        }
+
+        .code-container {
+            background: #fff;
+            color: #111;
+            padding: 24px;
+            border-radius: 12px;
+            height: calc(100% - 80px);
+            overflow-y: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            position: relative;
+            border: 1px solid #eee;
+            transition: all 0.3s ease;
+        }
+        .code-container.dark {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            border-color: #333;
+        }
+        .code-container pre {
+            margin: 0;
+            background: transparent !important;
+            padding: 0 !important;
+        }
+        .code-container code {
+            font-family: inherit !important;
+        }
+
+        /* Prism Theme Adjustments - Deep High Contrast & Vibrant Colors */
+        .code-container.dark .token.comment { color: #6a9955 !important; font-style: italic; }
+        .code-container.dark .token.keyword { color: #569cd6 !important; font-weight: bold; }
+        .code-container.dark .token.string { color: #ce9178 !important; }
+        .code-container.dark .token.function { color: #dcdcaa !important; }
+        .code-container.dark .token.operator { color: #d4d4d4 !important; }
+        .code-container.dark .token.number { color: #b5cea8 !important; }
+
+        .code-container:not(.dark) { color: #000000 !important; background: #ffffff !important; }
+        .code-container:not(.dark) pre code { color: #000000 !important; }
+        
+        /* IDENTIFIERS ARE DARK - Everything else is VIBRANT */
+        .code-container:not(.dark) .token.plain,
+        .code-container:not(.dark) .token.variable,
+        .code-container:not(.dark) .token.constant,
+        .code-container:not(.dark) .token.attr-value,
+        .code-container:not(.dark) .token.property,
+        .code-container:not(.dark) .token.property-access,
+        .code-container:not(.dark) .token.builtin { 
+            color: #000000 !important; 
+            font-weight: 500; 
+        }
+
+        .code-container:not(.dark) .token.comment { color: #22863a !important; font-style: italic; opacity: 1; }
+        .code-container:not(.dark) .token.keyword { color: #cf222e !important; font-weight: 800; }
+        .code-container:not(.dark) .token.string { color: #e36209 !important; font-weight: 600; }
+        .code-container:not(.dark) .token.function { color: #8250df !important; font-weight: 700; }
+        .code-container:not(.dark) .token.operator { color: #000000 !important; font-weight: 900; }
+        .code-container:not(.dark) .token.number { color: #e36209 !important; font-weight: 700; }
+        .code-container:not(.dark) .token.boolean { color: #e36209 !important; font-weight: 700; }
+        .code-container:not(.dark) .token.punctuation { color: #000000 !important; font-weight: 600; }
+        
+        .code-container:not(.dark) .token.selector,
+        .code-container:not(.dark) .token.tag,
+        .code-container:not(.dark) .token.class-name,
+        .code-container:not(.dark) .token.attr-name { color: #000000 !important; font-weight: 700; }
+
+        .theme-toggle {
+            background: #f0f0f0;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-right: 8px;
+        }
+        .theme-toggle:hover { background: #e5e5e5; }
+
+        #threeContainer {
+            width: 100%;
+            flex-grow: 1;
+            min-height: 400px;
+            background: #fff;
+            border-radius: 12px;
+            border: 1px solid #eee;
+            cursor: move;
+            position: relative;
+        }
+
+        .control-panel {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 12px;
+            font-size: 11px;
+            align-items: center;
+        }
+        .switch { display: flex; align-items: center; gap: 6px; cursor: pointer; color: #666; }
+
+        .action-icons { position: absolute; top: 30px; right: 40px; display: flex; gap: 12px; color: #ccc; }
+        .icon { cursor: pointer; transition: color 0.2s; }
+        .icon:hover { color: #111; }
+
+        .tabs { display: flex; gap: 20px; margin-top: 20px; border-bottom: 1px solid #eee; }
+        .tab { padding-bottom: 8px; color: #999; cursor: pointer; font-size: 14px; font-weight: 600; transition: color 0.2s; position: relative; }
+        .tab.active { color: #111; }
+        .tab.active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: #111; }
+
+        .hidden { display: none !important; }
+
+        .copy-btn {
+            background: #f0f0f0;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 4px 12px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            float: right;
+            margin-bottom: 8px;
+        }
+        .copy-btn:hover { background: #d5d5d5; }
+        .copy-btn.copied { background: #e5e5e5; color: #111; border-color: #ddd; }
+
+        .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding: 0 4px;
+        }
+        .header-row h2 {
+            font-size: 16px;
+            font-weight: 600;
+            margin: 0;
+            color: #333;
+        }
+
+        .content-split-wrapper {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+        }
+
+        .left-column { width: 100%; }
+        .right-column { width: 100%; }
+
+        @media (min-width: 1024px) {
+            .main-card.expanded .content-split-wrapper {
+                flex-direction: row;
+                gap: 60px;
+                align-items: flex-start;
+            }
+            .main-card.expanded .left-column {
+                width: 250px;
+                position: sticky;
+                top: 0;
+            }
+            .main-card.expanded .right-column {
+                flex-grow: 1;
+                min-width: 0;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .main-card { padding: 30px 20px; border-radius: 24px; max-height: 98vh; }
+            .large-o { font-size: 40px; }
+            .action-icons { top: 20px; right: 20px; }
+        }
+    </style>
+</head>
+<body id="body">
+
+    <div class="main-card" id="card">
+        <div class="action-icons">
+            <div id="fsBtn" class="icon" title="Toggle Fullscreen">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+            </div>
+            <div id="resetBtn" class="icon" title="Reset">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            </div>
+        </div>
+
+        <div class="card-scroll-area">
+            <div class="content-split-wrapper">
+                <div class="left-column">
+                    <div class="large-o">O</div>
+                    <div class="you-header">OXIDEXLA</div>
+                    <div class="gaegu mb-4" style="font-size: 24px; color: #111;">Native JAX Transpilation</div>
+
+                    <div class="flex items-center gap-4 mb-4">
+                        <button class="pill-btn" id="runBtn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM9 16.5v-9l7 4.5-7 4.5z"/></svg>
+                            <span>Transpile</span>
+                        </button>
+                    </div>
+                    <div class="meta-text gaegu" id="fileStatus" style="margin-bottom: 8px;">Ready for .onnx model</div>
+                    <div class="meta-text gaegu cursor-pointer" id="sampleBtn" style="color: blue; text-decoration: underline; font-size: 14px;">Try Sample: DeiT</div>
+
+                    <input type="file" id="fileInput" class="hidden" accept=".onnx">
+                </div>
+
+                <div class="right-column">
+                    <div id="resultTabs" class="hidden tabs">
+                        <div class="tab active" id="tabCode">JAX Code</div>
+                        <div class="tab" id="tab3D">Explorer</div>
+                        <div class="tab" id="tabAscii">Topology</div>
+                    </div>
+
+                    <div id="codeResult" class="panel-container hidden" style="background: white;">
+                        <div class="header-row">
+                            <h2>JAX Implementation</h2>
+                            <div>
+                                <button id="themeToggle" class="theme-toggle">Light/Dark</button>
+                                <button id="copyBtn" class="copy-btn">copy</button>
+                            </div>
+                        </div>
+                        <div id="jaxCode" class="code-container"><pre><code class="language-python"># Model logic will appear here...</code></pre></div>
+                    </div>
+
+                    <div id="threeResult" class="panel-container hidden">
+                        <div class="control-panel">
+                            <label class="switch"><input type="checkbox" id="toggleEdges" checked> Edges</label>
+                            <label class="switch"><input type="checkbox" id="toggleNeurons" checked> Params</label>
+                            <span style="margin-left: auto; color: #aaa; font-size: 10px;">Zoom with Scroll</span>
+                        </div>
+                        <div id="threeContainer"></div>
+                    </div>
+
+                    <div id="asciiResult" class="panel-container hidden">
+                        <pre id="asciiPre"></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import init, { transpile_onnx } from "./pkg/oxide_xla.js";
+
+        let wasmReady = false;
+        let graphData = null;
+        let scene, camera, renderer, worldGroup, nodesGroup, edgesGroup, labelsGroup;
+        let isFS = false;
+
+        init().then(() => { wasmReady = true; console.log("Engine Ready."); });
+
+        const card = document.getElementById('card');
+        const runBtn = document.getElementById('runBtn');
+        const fileInput = document.getElementById('fileInput');
+        const fileStatus = document.getElementById('fileStatus');
+        const resultTabs = document.getElementById('resultTabs');
+
+        const tabs = {
+            code: document.getElementById('tabCode'),
+            three: document.getElementById('tab3D'),
+            ascii: document.getElementById('tabAscii')
+        };
+        const panels = {
+            code: document.getElementById('codeResult'),
+            three: document.getElementById('threeResult'),
+            ascii: document.getElementById('asciiResult')
+        };
+
+        function switchTab(name) {
+            Object.values(tabs).forEach(t => t.classList.remove('active'));
+            Object.values(panels).forEach(p => p.classList.add('hidden'));
+            tabs[name].classList.add('active');
+            panels[name].classList.remove('hidden');
+            if(name === 'three') {
+                setTimeout(() => {
+                    init3D();
+                    update3DSize();
+                }, 50);
+            }
+        }
+
+        tabs.code.onclick = () => switchTab('code');
+        tabs.three.onclick = () => switchTab('three');
+        tabs.ascii.onclick = () => switchTab('ascii');
+        document.getElementById('resetBtn').onclick = () => location.reload();
+
+        document.getElementById('copyBtn').onclick = () => {
+            const code = document.getElementById('jaxCode').innerText;
+            navigator.clipboard.writeText(code).then(() => {
+                const btn = document.getElementById('copyBtn');
+                btn.textContent = "Copied!";
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = "copy";
+                    btn.classList.remove('copied');
+                }, 2000);
+            });
+        };
+
+        document.getElementById('themeToggle').onclick = () => {
+            document.getElementById('jaxCode').classList.toggle('dark');
+        };
+
+        document.getElementById('fsBtn').onclick = () => {
+            isFS = !isFS;
+            card.classList.toggle('fullscreen', isFS);
+            if(renderer) setTimeout(update3DSize, 100);
+        };
+
+        function init3D() {
+            if (renderer) return;
+            const container = document.getElementById('threeContainer');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xffffff);
+            
+            camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 3000);
+            camera.position.set(200, 200, 600);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            worldGroup = new THREE.Group();
+            scene.add(worldGroup);
+
+            nodesGroup = new THREE.Group();
+            edgesGroup = new THREE.Group();
+            labelsGroup = new THREE.Group();
+            worldGroup.add(nodesGroup);
+            worldGroup.add(edgesGroup);
+            worldGroup.add(labelsGroup);
+
+            const light = new THREE.PointLight(0xffffff, 2, 1200);
+            light.position.set(200, 400, 200);
+            scene.add(light);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+
+            let isDown = false;
+            let px = 0, py = 0;
+            container.onmousedown = (e) => { 
+                isDown = true; 
+                px = e.clientX; 
+                py = e.clientY; 
+            };
+            window.onmouseup = () => isDown = false;
+            window.onmousemove = (e) => {
+                if(!isDown) return;
+                const dx = e.clientX - px; const dy = e.clientY - py;
+                worldGroup.rotation.y += dx * 0.01;
+                worldGroup.rotation.x += dy * 0.01;
+                px = e.clientX; py = e.clientY;
+            };
+            
+            container.onwheel = (e) => {
+                camera.position.z += e.deltaY * 0.6;
+                e.preventDefault(); e.stopPropagation();
+            };
+
+            function anim() { 
+                requestAnimationFrame(anim); 
+                renderer.render(scene, camera); 
+                // Always face labels to camera and force sync
+                if(labelsGroup) {
+                    labelsGroup.children.forEach(l => {
+                        l.quaternion.copy(camera.quaternion);
+                    });
+                }
+            }
+            anim();
+            if(graphData) update3D();
+        }
+
+        function update3DSize() {
+            if(!renderer) return;
+            const container = document.getElementById('threeContainer');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        function update3D() {
+            if(!nodesGroup) return;
+            nodesGroup.clear(); edgesGroup.clear(); labelsGroup.clear();
+            const nodes = graphData.nodes;
+            const edges = graphData.edges;
+            const showParams = document.getElementById('toggleNeurons').checked;
+
+            const depths = new Array(nodes.length).fill(-1);
+            function getDepth(i) {
+                if(depths[i] !== -1) return depths[i];
+                let d = 0;
+                edges.filter(e => e.target === i).forEach(e => d = Math.max(d, getDepth(e.source) + 1));
+                return depths[i] = d;
+            }
+            nodes.forEach((_, i) => getDepth(i));
+
+            const nodePos = nodes.map((_, i) => {
+                const layer = depths[i];
+                const siblings = nodes.filter((_, idx) => depths[idx] === layer);
+                const idx = siblings.indexOf(i);
+                return { x: (idx - siblings.length/2) * 100, y: (layer * -140) + 250, z: (Math.random()-0.5)*10 };
+            });
+
+            const sphereGeo = new THREE.SphereGeometry(12, 32, 32);
+            const boxGeo = new THREE.BoxGeometry(24, 24, 24);
+
+            nodes.forEach((n, i) => {
+                const isConst = n.node_type === "Constant";
+                if(!showParams && isConst) return;
+                
+                let color = 0x000000; // Pitch black like ref
+                if(n.node_type === "Input") color = 0x000000;
+                if(isConst) color = 0x666666;
+
+                const mat = new THREE.MeshPhongMaterial({ color, shininess: 100 });
+                const mesh = new THREE.Mesh(n.node_type === "Operator" ? boxGeo : sphereGeo, mat);
+                mesh.position.set(nodePos[i].x, nodePos[i].y, nodePos[i].z);
+                nodesGroup.add(mesh);
+
+                // Technical Label: bold, clearer, larger
+                const labelText = isConst ? `p_{${i}}` : (typeof n.op === 'string' ? n.op : Object.keys(n.op)[0]);
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = 512; canvas.height = 128;
+                ctx.font = "bold 56px Outfit";
+                ctx.fillStyle = "#000000";
+                ctx.textAlign = "left";
+                ctx.fillText(labelText, 20, 80);
+                
+                const texture = new THREE.CanvasTexture(canvas);
+                const labelMat = new THREE.SpriteMaterial({ map: texture, transparent: true });
+                const label = new THREE.Sprite(labelMat);
+                label.scale.set(120, 30, 1); // Much larger
+                label.position.set(nodePos[i].x + 35, nodePos[i].y + 15, nodePos[i].z);
+                labelsGroup.add(label);
+            });
+
+            if(document.getElementById('toggleEdges').checked) {
+                const lineMat = new THREE.LineBasicMaterial({ color: 0xcccccc, transparent: true, opacity: 0.5 });
+                edges.forEach(e => {
+                    if(!showParams && (nodes[e.source].node_type === "Constant" || nodes[e.target].node_type === "Constant")) return;
+                    const points = [nodePos[e.source], nodePos[e.target]].map(p => new THREE.Vector3(p.x, p.y, p.z));
+                    edgesGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), lineMat));
+                });
+            }
+        }
+
+        document.getElementById('toggleEdges').onchange = update3D;
+        document.getElementById('toggleNeurons').onchange = update3D;
+
+        document.getElementById('sampleBtn').onclick = async () => {
+            fileStatus.innerText = "Loading Sample: deit.onnx...";
+            try {
+                const res = await fetch('deit.onnx');
+                const buf = await res.arrayBuffer();
+                performTranspile(new Uint8Array(buf), "deit.onnx");
+            } catch (err) {
+                alert("Failed to load sample: " + err);
+            }
+        };
+
+        runBtn.onclick = () => { if(!fileInput.files[0]) fileInput.click(); else process(); };
+        fileInput.onchange = (e) => { if(e.target.files.length) { fileStatus.innerText = "Model: " + e.target.files[0].name; process(); } };
+
+        function process() {
+            const reader = new FileReader();
+            reader.onload = (e) => performTranspile(new Uint8Array(e.target.result), fileInput.files[0].name);
+            reader.readAsArrayBuffer(fileInput.files[0]);
+        }
+
+        function performTranspile(bytes, name) {
+            try {
+                const res = transpile_onnx(bytes);
+                graphData = JSON.parse(res.json);
+                const jaxCodeDiv = document.getElementById('jaxCode');
+                jaxCodeDiv.innerHTML = `<pre><code class="language-python">${res.code}</code></pre>`;
+                Prism.highlightAllUnder(jaxCodeDiv);
+                card.classList.add('expanded');
+                resultTabs.classList.remove('hidden');
+                fileStatus.innerText = "Model: " + name;
+                
+                let ascii = "MODEL TOPOLOGY\n==============\n\n";
+                graphData.nodes.forEach((n, i) => {
+                    const outs = graphData.edges.filter(e => e.source === i).map(e => {
+                        const op = graphData.nodes[e.target].op;
+                        return typeof op === 'string' ? op : Object.keys(op)[0];
+                    });
+                    const op = typeof n.op === 'string' ? n.op : Object.keys(n.op)[0];
+                    ascii += `[${String(i).padStart(3, '0')}] ${op.padEnd(12)} -> [${outs.join(", ")}]\n`;
+                });
+                document.getElementById('asciiPre').textContent = ascii;
+                switchTab('code');
+                if (renderer) update3D();
+            } catch (err) {
+                alert("Transpilation failed: " + err);
+            }
+        }
+
+        window.addEventListener('resize', () => renderer && update3DSize());
+    </script>
+</body>
+</html>
