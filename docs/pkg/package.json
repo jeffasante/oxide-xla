@@ -1,0 +1,31 @@
+{
+  "name": "oxide_xla",
+  "type": "module",
+  "collaborators": [
+    "Jeffrey Asante"
+  ],
+  "description": "A high-speed Rust compiler for transforming PyTorch FX graphs into pure, stateless JAX functions.",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jeffasante/oxide-xla"
+  },
+  "files": [
+    "oxide_xla_bg.wasm",
+    "oxide_xla.js",
+    "oxide_xla.d.ts"
+  ],
+  "main": "oxide_xla.js",
+  "types": "oxide_xla.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ],
+  "keywords": [
+    "onnx",
+    "jax",
+    "pytorch",
+    "transpiler",
+    "compiler"
+  ]
+}
