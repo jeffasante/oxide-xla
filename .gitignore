@@ -57,3 +57,4 @@ sample_jax_model.py
 # Debug / Logs
 *.log
 CONTRIBUTING.md
+BLUEPRINT.md
