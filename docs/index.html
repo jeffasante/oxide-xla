@@ -283,9 +283,15 @@
         }
 
         @media (max-width: 640px) {
-            .main-card { padding: 30px 20px; border-radius: 24px; max-height: 98vh; }
-            .large-o { font-size: 40px; }
-            .action-icons { top: 20px; right: 20px; }
+            .main-card { padding: 25px 15px; border-radius: 24px; max-height: none; height: auto; margin: 10px; }
+            .large-o { font-size: 36px; margin-bottom: 12px; }
+            .action-icons { top: 15px; right: 15px; }
+            .panel-container { min-height: 380px; padding: 10px; }
+            #threeContainer { min-height: 320px; }
+            .pill-btn { padding: 8px 20px; font-size: 14px; }
+            .tabs { gap: 12px; overflow-x: auto; padding-bottom: 2px; }
+            .tab { font-size: 12px; white-space: nowrap; }
+            .header-row h2 { font-size: 14px; }
         }
 
         .dev-pill {
@@ -499,6 +505,30 @@
                 camera.position.z += e.deltaY * 0.6;
                 e.preventDefault(); e.stopPropagation();
             };
+
+            // Touch support for mobile
+            container.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {
+                    isDown = true;
+                    px = e.touches[0].clientX;
+                    py = e.touches[0].clientY;
+                }
+            }, { passive: false });
+
+            container.addEventListener('touchmove', (e) => {
+                if (!isDown || e.touches.length !== 1) return;
+                const dx = e.touches[0].clientX - px;
+                const dy = e.touches[0].clientY - py;
+                worldGroup.rotation.y += dx * 0.008;
+                worldGroup.rotation.x += dy * 0.008;
+                px = e.touches[0].clientX;
+                py = e.touches[0].clientY;
+                if (Math.abs(dx) > 2 || Math.abs(dy) > 2) e.preventDefault();
+            }, { passive: false });
+
+            window.addEventListener('touchend', () => {
+                isDown = false;
+            });
 
             function anim() { 
                 requestAnimationFrame(anim); 
