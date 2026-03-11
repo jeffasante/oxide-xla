@@ -55,6 +55,7 @@ pub fn map_onnx_op(op_type: &str, attributes: &HashMap<String, OnnxAttribute>) -
 
         // Neural Network
         "Conv" => nn::map_conv(attributes),
+        "ConvTranspose" => nn::map_conv_transpose(attributes),
         "MaxPool" => nn::map_maxpool(attributes),
         "AveragePool" | "GlobalAveragePool" => nn::map_global_avg_pool(),
         "BatchNormalization" => nn::map_batchnorm(attributes),

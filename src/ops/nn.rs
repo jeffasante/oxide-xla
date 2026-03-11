@@ -92,6 +92,42 @@ pub fn map_conv(attributes: &HashMap<String, OnnxAttribute>) -> Result<JaxOp> {
     })
 }
 
+/// ConvTranspose -> jax.lax.conv_transpose
+pub fn map_conv_transpose(attributes: &HashMap<String, OnnxAttribute>) -> Result<JaxOp> {
+    let strides = match attributes.get("strides") {
+        Some(OnnxAttribute::Ints(v)) => v.clone(),
+        _ => vec![1, 1],
+    };
+
+    let pads = match attributes.get("pads") {
+        Some(OnnxAttribute::Ints(v)) => v.clone(),
+        _ => vec![0, 0, 0, 0],
+    };
+
+    let dilations = match attributes.get("dilations") {
+        Some(OnnxAttribute::Ints(v)) => v.clone(),
+        _ => vec![1, 1],
+    };
+
+    let group = match attributes.get("group") {
+        Some(OnnxAttribute::Int(v)) => *v,
+        _ => 1,
+    };
+
+    let output_padding = match attributes.get("output_padding") {
+        Some(OnnxAttribute::Ints(v)) => v.clone(),
+        _ => vec![0, 0],
+    };
+
+    Ok(JaxOp::ConvTranspose {
+        strides,
+        pads,
+        dilations,
+        group,
+        output_padding,
+    })
+}
+
 /// Map MaxPool.
 pub fn map_maxpool(attributes: &HashMap<String, OnnxAttribute>) -> Result<JaxOp> {
     let strides = if let Some(OnnxAttribute::Ints(v)) = attributes.get("strides") {

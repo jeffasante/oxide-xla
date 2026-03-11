@@ -45,6 +45,13 @@ pub enum JaxOp {
         dilations: Vec<i64>,
         group: i64,
     },
+    ConvTranspose {
+        strides: Vec<i64>,
+        pads: Vec<i64>,
+        dilations: Vec<i64>,
+        group: i64,
+        output_padding: Vec<i64>,
+    },
     BatchNorm { epsilon: f32 },
     MaxPool {
         strides: Vec<i64>,

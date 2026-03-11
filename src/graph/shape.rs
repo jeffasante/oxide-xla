@@ -65,6 +65,9 @@ pub fn infer_shapes(ir_graph: &mut IrGraph) -> Result<()> {
             JaxOp::Conv { strides, pads, dilations, .. } => {
                 infer_conv(&input_shapes, strides, pads, dilations)?
             }
+            JaxOp::ConvTranspose { strides, pads, dilations, output_padding, .. } => {
+                infer_conv_transpose(&input_shapes, strides, pads, dilations, output_padding)?
+            }
             JaxOp::MaxPool { strides, kernel_shape, pads } => {
                 infer_maxpool(&input_shapes, strides, kernel_shape, pads)?
             }
@@ -311,6 +314,35 @@ fn infer_conv(inputs: &[Vec<i64>], strides: &[i64], pads: &[i64], _dilations: &[
         let k = weight[dim];
         
         let out_dim = (input[dim] + p - k) / s + 1;
+        output.push(out_dim);
+    }
+    
+    Ok(output)
+}
+
+/// ConvTranspose: output = (input - 1) * stride + output_padding + kernel_size - 2 * padding
+fn infer_conv_transpose(inputs: &[Vec<i64>], strides: &[i64], pads: &[i64], _dilations: &[i64], output_padding: &[i64]) -> Result<Vec<i64>> {
+    if inputs.len() < 2 {
+        bail!("ConvTranspose requires at least 2 inputs");
+    }
+    let input = &inputs[0];   // [N, Ci, H, W]
+    let weight = &inputs[1];  // [Ci, Co/group, kH, kW]
+    
+    if input.len() < 4 || weight.len() < 4 {
+        return Ok(input.clone());
+    }
+
+    // ONNX ConvTranspose weight is [Ci, Co/group, kH, kW]
+    let mut output = vec![input[0], weight[1]]; // N, Co
+    
+    for i in 0..2 {
+        let dim = i + 2;
+        let p = if pads.len() >= 4 { pads[i] + pads[i+2] } else { 0 };
+        let s = if strides.len() >= 2 { strides[i] } else { 1 };
+        let k = weight[dim];
+        let op = if output_padding.len() >= 2 { output_padding[i] } else { 0 };
+        
+        let out_dim = s * (input[dim] - 1) + op + k - p;
         output.push(out_dim);
     }
     

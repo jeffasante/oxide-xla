@@ -134,6 +134,15 @@ pub fn emit_node(
                 dilations.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(", "),
                 group)
         }
+        JaxOp::ConvTranspose { strides, pads, dilations, group, .. } => {
+            let padding_str = pads.chunks(2).map(|c| format!("({}, {})", c[0], c[1])).collect::<Vec<_>>().join(", ");
+            format!("{} = jax.lax.conv_transpose({}, {}, strides=({}), padding=[{}], rhs_dilation=({}), feature_group_count={})",
+                output_var, input_vars[0], input_vars[1], 
+                strides.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", "),
+                padding_str,
+                dilations.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(", "),
+                group)
+        }
         JaxOp::BatchNorm { epsilon } => {
             format!("{} = ({} - {}.reshape(1, -1, 1, 1)) / jnp.sqrt({}.reshape(1, -1, 1, 1) + {}) * {}.reshape(1, -1, 1, 1) + {}.reshape(1, -1, 1, 1)",
                 output_var, input_vars[0], input_vars[3], input_vars[4], epsilon, input_vars[1], input_vars[2])
