@@ -315,14 +315,54 @@
             border-color: #ddd;
         }
 
-        .main-card.drag-over {
-            border: 2px dashed #111 !important;
-            transform: scale(1.01);
-            background: #fdfdfd;
+        /* Drag Overlay */
+        #dropOverlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255, 255, 255, 0.95);
+            z-index: 9999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            pointer-events: none;
+            backdrop-filter: blur(8px);
+            transition: all 0.3s ease;
+        }
+
+        #dropOverlay.active {
+            display: flex;
+            pointer-events: all;
+        }
+
+        .drop-zone-ring {
+            width: 300px;
+            height: 300px;
+            border: 3px dashed #111;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: rotate 10s linear infinite;
+        }
+
+        @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+        .drop-text {
+            position: absolute;
+            font-family: 'Gaegu', cursive;
+            font-size: 32px;
+            font-weight: 800;
+            color: #111;
+            text-align: center;
         }
     </style>
 </head>
 <body id="body">
+    <div id="dropOverlay">
+        <div class="drop-zone-ring"></div>
+        <div class="drop-text">Drop .onnx Model Here</div>
+    </div>
 
     <div class="main-card" id="card">
         <div class="action-icons">
@@ -648,22 +688,31 @@
         }
 
         // Drag and Drop Logic
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(evt => {
-            document.body.addEventListener(evt, (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-            }, false);
-        });
+        const dropOverlay = document.getElementById('dropOverlay');
+        let dragCounter = 0;
 
-        ['dragenter', 'dragover'].forEach(evt => {
-            document.body.addEventListener(evt, () => card.classList.add('drag-over'), false);
-        });
+        window.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            dragCounter++;
+            dropOverlay.classList.add('active');
+        }, false);
 
-        ['dragleave', 'drop'].forEach(evt => {
-            document.body.addEventListener(evt, () => card.classList.remove('drag-over'), false);
-        });
+        window.addEventListener('dragover', (e) => {
+            e.preventDefault();
+        }, false);
 
-        document.body.addEventListener('drop', (e) => {
+        window.addEventListener('dragleave', (e) => {
+            dragCounter--;
+            if (dragCounter === 0) {
+                dropOverlay.classList.remove('active');
+            }
+        }, false);
+
+        window.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dragCounter = 0;
+            dropOverlay.classList.remove('active');
+            
             const files = e.dataTransfer.files;
             if (files.length) {
                 const file = files[0];
