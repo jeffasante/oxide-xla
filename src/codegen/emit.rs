@@ -194,7 +194,15 @@ pub fn emit_node(
         JaxOp::Softmax { axis } => format!("{} = jax.nn.softmax({}, axis={})", output_var, input_vars[0], axis),
 
         // Shape Manipulation
-        JaxOp::Reshape { target_shape } => format!("{} = jnp.reshape({}, ({}))", output_var, input_vars[0], target_shape.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(", ")),
+        JaxOp::Reshape { target_shape } => {
+            if !target_shape.is_empty() {
+                format!("{} = jnp.reshape({}, ({}))", output_var, input_vars[0], target_shape.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(", "))
+            } else if input_vars.len() >= 2 {
+                format!("{} = jnp.reshape({}, {})", output_var, input_vars[0], input_vars[1])
+            } else {
+                format!("{} = jnp.reshape({}, ())", output_var, input_vars[0])
+            }
+        },
         JaxOp::Transpose { perm } => format!("{} = jnp.transpose({}, ({}))", output_var, input_vars[0], perm.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ")),
         JaxOp::Concat { axis } => format!("{} = jnp.concatenate([{}], axis={})", output_var, input_vars.join(", "), axis),
         JaxOp::Gather { axis } => format!("{} = jnp.take({}, {}, axis={})", output_var, input_vars[0], input_vars[1], axis),
