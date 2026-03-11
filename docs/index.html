@@ -311,9 +311,14 @@
             text-transform: lowercase;
         }
         .dev-pill:hover {
-            background: #eee;
             color: #111;
             border-color: #ddd;
+        }
+
+        .main-card.drag-over {
+            border: 2px dashed #111 !important;
+            transform: scale(1.01);
+            background: #fdfdfd;
         }
     </style>
 </head>
@@ -641,6 +646,37 @@
             reader.onload = (e) => performTranspile(new Uint8Array(e.target.result), fileInput.files[0].name);
             reader.readAsArrayBuffer(fileInput.files[0]);
         }
+
+        // Drag and Drop Logic
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(evt => {
+            document.body.addEventListener(evt, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            }, false);
+        });
+
+        ['dragenter', 'dragover'].forEach(evt => {
+            document.body.addEventListener(evt, () => card.classList.add('drag-over'), false);
+        });
+
+        ['dragleave', 'drop'].forEach(evt => {
+            document.body.addEventListener(evt, () => card.classList.remove('drag-over'), false);
+        });
+
+        document.body.addEventListener('drop', (e) => {
+            const files = e.dataTransfer.files;
+            if (files.length) {
+                const file = files[0];
+                if (file.name.endsWith('.onnx')) {
+                    fileStatus.innerText = "Model: " + file.name;
+                    const reader = new FileReader();
+                    reader.onload = (re) => performTranspile(new Uint8Array(re.target.result), file.name);
+                    reader.readAsArrayBuffer(file);
+                } else {
+                    alert("Please drop a .onnx model file.");
+                }
+            }
+        }, false);
 
         function performTranspile(bytes, name) {
             try {
