@@ -279,4 +279,49 @@ impl IrGraph {
         let json_graph = JsonGraph { nodes, edges };
         Ok(serde_json::to_string(&json_graph)?)
     }
+
+    pub fn node_count(&self) -> usize {
+        self.graph.node_count()
+    }
+
+    pub fn to_ascii(&self) -> String {
+        let mut out = String::new();
+        out.push_str("\n OxideXLA -- IR Topology\n");
+        out.push_str(" ===========================\n\n");
+        
+        let mut order = self.topo_order();
+        if order.is_empty() {
+             // Fallback to insertion order if topo fails
+             order = (0..self.graph.node_count()).map(NodeIndex::new).collect();
+        }
+
+        out.push_str(&format!(" {:<6} | {:<18} | {:<20}\n", "ID", "OPERATOR", "OUTBOUND TO"));
+        out.push_str(&format!(" {:-<6}-|-{:-<18}-|-{:-<20}\n", "", "", ""));
+
+        for idx in order {
+            let node = &self.graph[idx];
+            let op_str = match &node.op {
+                JaxOp::Unknown(s) => format!("? {}", s),
+                _ => {
+                    let s = format!("{:?}", node.op);
+                    if s.len() > 18 { format!("{}...", &s[..15]) } else { s }
+                }
+            };
+            
+            let outputs: Vec<String> = self.graph.neighbors(idx)
+                .map(|neighbor| neighbor.index().to_string())
+                .collect();
+            
+            let out_str = if outputs.is_empty() { 
+                "(output)".to_string() 
+            } else { 
+                outputs.join(", ") 
+            };
+
+            out.push_str(&format!(" [{:>3}]  | {:<18} | {:<20}\n", idx.index(), op_str, out_str));
+        }
+        
+        out.push_str("\n Ready for JAX generation.\n");
+        out
+    }
 }

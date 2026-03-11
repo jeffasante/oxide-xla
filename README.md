@@ -204,6 +204,7 @@ The script automatically generates `deit_jax.py` in your working directory conta
 
 ```bash
 # Build from source
+cargo install --path .
 cargo build --release
 
 # Inspect an ONNX graph (ASCII)
@@ -214,6 +215,9 @@ oxide_xla inspect model.onnx --format json
 
 # Transpile to JAX
 oxide_xla compile model.onnx --output model_jax.py
+
+# View the generated JAX code
+cat model_jax.py
 ```
 
 ## Generated Output
