@@ -57,9 +57,39 @@ pub fn infer_shapes(ir_graph: &mut IrGraph) -> Result<()> {
             JaxOp::LeakyRelu { .. } | JaxOp::Selu { .. } | JaxOp::Softplus |
             JaxOp::Softsign | JaxOp::ThresholdedRelu { .. } | JaxOp::Gelu |
             JaxOp::Mish | JaxOp::PRelu | JaxOp::Clip | JaxOp::Identity |
-            JaxOp::Sqrt | JaxOp::Cast | JaxOp::BatchNorm { .. } | JaxOp::LayerNormalization { .. } |
-            JaxOp::Softmax { .. } | JaxOp::Squeeze | JaxOp::Unsqueeze => {
+            JaxOp::Sqrt | JaxOp::BatchNorm { .. } | JaxOp::LayerNormalization { .. } |
+            JaxOp::Softmax { .. } => {
                 infer_elementwise(&input_shapes)?
+            }
+
+            // Cast: shape unchanged, just dtype changes
+            JaxOp::Cast { .. } => {
+                infer_elementwise(&input_shapes)?
+            }
+
+            // Squeeze: remove dimensions at given axes
+            JaxOp::Squeeze { axes } => {
+                infer_squeeze(&input_shapes, axes)?
+            }
+
+            // Unsqueeze: insert dimensions at given axes
+            JaxOp::Unsqueeze { axes } => {
+                infer_unsqueeze(&input_shapes, axes)?
+            }
+
+            // Split: divide along axis into num_outputs parts
+            JaxOp::Split { axis, num_outputs } => {
+                infer_split(&input_shapes, *axis, *num_outputs)?
+            }
+
+            // Constant: scalar (empty shape) or from value
+            JaxOp::Constant { .. } => {
+                vec![]
+            }
+
+            // AveragePool: similar to Conv
+            JaxOp::AveragePool { kernel_shape, strides, pads } => {
+                infer_avgpool(&input_shapes, kernel_shape, strides, pads)?
             }
 
             JaxOp::Conv { strides, pads, dilations, .. } => {
@@ -86,9 +116,17 @@ pub fn infer_shapes(ir_graph: &mut IrGraph) -> Result<()> {
             JaxOp::Transpose { perm } => infer_transpose(&input_shapes, perm)?,
             JaxOp::Concat { axis } => infer_concat(&input_shapes, *axis)?,
             JaxOp::Gather { axis } => infer_gather(&input_shapes, *axis)?,
-            JaxOp::Tile | JaxOp::Expand | JaxOp::Resize | JaxOp::DepthToSpace | JaxOp::Slice | JaxOp::Pad { .. } => {
+            JaxOp::Tile | JaxOp::Expand | JaxOp::Resize | JaxOp::DepthToSpace => {
                 // Fallback: borrow input shape
                 if input_shapes.is_empty() { Vec::new() } else { input_shapes[0].clone() }
+            }
+
+            JaxOp::Slice { starts, ends, axes, .. } => {
+                infer_slice(&input_shapes, starts, ends, axes)?
+            }
+
+            JaxOp::Pad { pads, .. } => {
+                infer_pad(&input_shapes, pads)?
             }
 
             // Reductions
@@ -105,7 +143,7 @@ pub fn infer_shapes(ir_graph: &mut IrGraph) -> Result<()> {
                 if input_shapes.is_empty() { Vec::new() } else { vec![input_shapes[0].len() as i64] }
             }
 
-            JaxOp::Constant | JaxOp::DynamicQuantizeLinear | JaxOp::Unknown(_) => {
+            JaxOp::DynamicQuantizeLinear | JaxOp::Unknown(_) => {
                 if input_shapes.is_empty() { Vec::new() } else { input_shapes[0].clone() }
             }
         };
@@ -185,10 +223,6 @@ fn infer_reduction(inputs: &[Vec<i64>], axes: &[i64], keepdims: bool) -> Result<
     Ok(result)
 }
 
-/// Legacy ReduceMean wrapper
-fn infer_reducemean(inputs: &[Vec<i64>], axes: &[i64], keepdims: bool) -> Result<Vec<i64>> {
-    infer_reduction(inputs, axes, keepdims)
-}
 
 /// Elementwise: Shape remains identical.
 fn infer_elementwise(inputs: &[Vec<i64>]) -> Result<Vec<i64>> {
@@ -371,4 +405,122 @@ fn infer_maxpool(inputs: &[Vec<i64>], strides: &[i64], kernel_shape: &[i64], pad
     }
     
     Ok(output)
+}
+
+/// Squeeze: Remove dimensions at the given axes.
+fn infer_squeeze(inputs: &[Vec<i64>], axes: &[i64]) -> Result<Vec<i64>> {
+    if inputs.is_empty() {
+        return Ok(vec![]);
+    }
+    let input = &inputs[0];
+    if axes.is_empty() {
+        // Remove all dimensions of size 1
+        return Ok(input.iter().filter(|&&d| d != 1).cloned().collect());
+    }
+    let ndim = input.len() as i64;
+    let abs_axes: std::collections::HashSet<usize> = axes.iter()
+        .map(|&a| if a < 0 { (ndim + a) as usize } else { a as usize })
+        .collect();
+    Ok(input.iter().enumerate()
+        .filter(|(i, _)| !abs_axes.contains(i))
+        .map(|(_, &d)| d)
+        .collect())
+}
+
+/// Unsqueeze: Insert dimensions of size 1 at the given axes.
+fn infer_unsqueeze(inputs: &[Vec<i64>], axes: &[i64]) -> Result<Vec<i64>> {
+    if inputs.is_empty() {
+        return Ok(vec![]);
+    }
+    let input = &inputs[0];
+    if axes.is_empty() {
+        // Default: insert at position 0
+        let mut result = vec![1i64];
+        result.extend_from_slice(input);
+        return Ok(result);
+    }
+    let output_rank = input.len() + axes.len();
+    let mut result = vec![0i64; output_rank];
+    let abs_axes: std::collections::HashSet<usize> = axes.iter()
+        .map(|&a| if a < 0 { (output_rank as i64 + a) as usize } else { a as usize })
+        .collect();
+    
+    let mut src_idx = 0;
+    for i in 0..output_rank {
+        if abs_axes.contains(&i) {
+            result[i] = 1;
+        } else {
+            if src_idx < input.len() {
+                result[i] = input[src_idx];
+                src_idx += 1;
+            }
+        }
+    }
+    Ok(result)
+}
+
+/// Split: Output shape is the same as input but with the split axis divided.
+fn infer_split(inputs: &[Vec<i64>], axis: i64, num_outputs: usize) -> Result<Vec<i64>> {
+    if inputs.is_empty() || num_outputs == 0 {
+        return Ok(vec![]);
+    }
+    let input = &inputs[0];
+    let abs_axis = if axis < 0 { (input.len() as i64 + axis) as usize } else { axis as usize };
+    
+    let mut result = input.clone();
+    if abs_axis < result.len() && num_outputs > 0 {
+        result[abs_axis] = result[abs_axis] / num_outputs as i64;
+    }
+    Ok(result)
+}
+
+/// AveragePool: same calculation as MaxPool.
+fn infer_avgpool(inputs: &[Vec<i64>], kernel_shape: &[i64], strides: &[i64], pads: &[i64]) -> Result<Vec<i64>> {
+    infer_maxpool(inputs, strides, kernel_shape, pads)
+}
+
+/// Slice: Compute output shape based on start/end/axes.
+fn infer_slice(inputs: &[Vec<i64>], starts: &[i64], ends: &[i64], axes: &[i64]) -> Result<Vec<i64>> {
+    if inputs.is_empty() {
+        return Ok(vec![]);
+    }
+    let input = &inputs[0];
+    if starts.is_empty() || ends.is_empty() {
+        return Ok(input.clone());
+    }
+    
+    let mut result = input.clone();
+    let axes_resolved: Vec<usize> = if axes.is_empty() {
+        (0..starts.len()).collect()
+    } else {
+        axes.iter().map(|&a| if a < 0 { (input.len() as i64 + a) as usize } else { a as usize }).collect()
+    };
+    
+    for (i, &ax) in axes_resolved.iter().enumerate() {
+        if ax < result.len() && i < starts.len() && i < ends.len() {
+            let dim_size = result[ax];
+            let s = if starts[i] < 0 { (dim_size + starts[i]).max(0) } else { starts[i].min(dim_size) };
+            let e = if ends[i] < 0 { (dim_size + ends[i]).max(0) } else if ends[i] >= i64::MAX / 2 { dim_size } else { ends[i].min(dim_size) };
+            result[ax] = (e - s).max(0);
+        }
+    }
+    Ok(result)
+}
+
+/// Pad: Add padding to each dimension.
+fn infer_pad(inputs: &[Vec<i64>], pads: &[i64]) -> Result<Vec<i64>> {
+    if inputs.is_empty() {
+        return Ok(vec![]);
+    }
+    let input = &inputs[0];
+    if pads.is_empty() {
+        return Ok(input.clone());
+    }
+    
+    let ndim = pads.len() / 2;
+    let mut result = input.clone();
+    for i in 0..ndim.min(result.len()) {
+        result[i] += pads[i] + pads[i + ndim];
+    }
+    Ok(result)
 }

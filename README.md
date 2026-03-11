@@ -482,4 +482,4 @@ Apache 2.0
 
 ---
 
-*OxideXLA -- Jeffrey Asante -- 2026*
+*OxideXLA -- Jeffrey Asante -- 2026*.

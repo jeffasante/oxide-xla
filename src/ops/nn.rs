@@ -155,7 +155,24 @@ pub fn map_maxpool(attributes: &HashMap<String, OnnxAttribute>) -> Result<JaxOp>
     })
 }
 
-/// Map AveragePool / GlobalAveragePool.
+/// Map AveragePool with kernel/stride/pad attributes.
+pub fn map_averagepool(attributes: &HashMap<String, OnnxAttribute>) -> Result<JaxOp> {
+    let kernel_shape = match attributes.get("kernel_shape") {
+        Some(OnnxAttribute::Ints(v)) => v.clone(),
+        _ => vec![1, 1],
+    };
+    let strides = match attributes.get("strides") {
+        Some(OnnxAttribute::Ints(v)) => v.clone(),
+        _ => vec![1, 1],
+    };
+    let pads = match attributes.get("pads") {
+        Some(OnnxAttribute::Ints(v)) => v.clone(),
+        _ => vec![0, 0, 0, 0],
+    };
+    Ok(JaxOp::AveragePool { kernel_shape, strides, pads })
+}
+
+/// Map GlobalAveragePool.
 pub fn map_global_avg_pool() -> Result<JaxOp> {
     Ok(JaxOp::ReduceMean { axes: vec![2, 3], keepdims: true })
 }

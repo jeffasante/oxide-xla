@@ -31,6 +31,7 @@ pub fn generate_jax_module(ir_graph: &IrGraph) -> Result<String> {
     lines.push("import jax".to_string());
     lines.push("import jax.numpy as jnp".to_string());
     lines.push("import jax.lax".to_string());
+    lines.push("import jax.scipy.special".to_string());
     lines.push(String::new());
     lines.push(String::new());
 
@@ -42,7 +43,7 @@ pub fn generate_jax_module(ir_graph: &IrGraph) -> Result<String> {
         .filter_map(|&idx| {
             let node = &ir_graph.graph[idx];
             match &node.op {
-                JaxOp::Input => Some(node.name.clone()),
+                JaxOp::Input => Some(sanitize_python_name(&node.name)),
                 _ => None,
             }
         })
@@ -100,6 +101,33 @@ pub fn generate_jax_module(ir_graph: &IrGraph) -> Result<String> {
     Ok(lines.join("\n"))
 }
 
+/// Sanitize a string to be a valid Python identifier.
+///
+/// ONNX node names often contain characters that are invalid in Python:
+/// '/', '.', ':', '-', spaces, etc. We replace all of these with '_'
+/// and ensure the name doesn't start with a digit.
+fn sanitize_python_name(name: &str) -> String {
+    let mut result = String::with_capacity(name.len());
+    for ch in name.chars() {
+        if ch.is_alphanumeric() || ch == '_' {
+            result.push(ch);
+        } else {
+            result.push('_');
+        }
+    }
+    // Strip leading underscores for cleanliness
+    let trimmed = result.trim_start_matches('_');
+    if trimmed.is_empty() {
+        return "var".to_string();
+    }
+    // Ensure it doesn't start with a digit
+    if trimmed.chars().next().unwrap().is_ascii_digit() {
+        format!("v_{}", trimmed)
+    } else {
+        trimmed.to_string()
+    }
+}
+
 /// Convert an IrNode into the Python variable name used in the generated code.
 ///
 /// Param nodes are referenced as params['key'], everything else uses
@@ -109,7 +137,7 @@ fn var_name(node: &IrNode) -> String {
         JaxOp::Param => {
             format!("params['{}']", node.name)
         }
-        JaxOp::Input => node.name.clone(),
-        _ => node.name.clone(),
+        JaxOp::Input => sanitize_python_name(&node.name),
+        _ => sanitize_python_name(&node.name),
     }
 }

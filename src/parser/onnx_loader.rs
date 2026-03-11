@@ -80,6 +80,7 @@ pub enum OnnxAttribute {
     String(String),
     Ints(Vec<i64>),
     Floats(Vec<f32>),
+    Tensor { shape: Vec<i64>, data_type: i32, float_data: Vec<f32>, raw_data: Vec<u8>, int64_data: Vec<i64> },
 }
 
 // ---------------------------------------------------------------------------
@@ -236,13 +237,27 @@ fn extract_shape(vi: &onnx_proto::ValueInfoProto) -> Vec<i64> {
 
 /// Convert an ONNX AttributeProto into our simplified OnnxAttribute.
 fn convert_attribute(attr: &onnx_proto::AttributeProto) -> Option<OnnxAttribute> {
-    // AttributeProto.type: 1=FLOAT, 2=INT, 3=STRING, 6=FLOATS, 7=INTS
+    // AttributeProto.type: 1=FLOAT, 2=INT, 3=STRING, 4=TENSOR, 6=FLOATS, 7=INTS
     match attr.r#type {
         1 => Some(OnnxAttribute::Float(attr.f)),
         2 => Some(OnnxAttribute::Int(attr.i)),
         3 => {
             let s = String::from_utf8_lossy(&attr.s).to_string();
             Some(OnnxAttribute::String(s))
+        }
+        4 => {
+            // TENSOR type - extract the embedded TensorProto
+            if let Some(ref t) = attr.t {
+                Some(OnnxAttribute::Tensor {
+                    shape: t.dims.clone(),
+                    data_type: t.data_type,
+                    float_data: t.float_data.clone(),
+                    raw_data: t.raw_data.clone(),
+                    int64_data: t.int64_data.clone(),
+                })
+            } else {
+                None
+            }
         }
         6 => Some(OnnxAttribute::Floats(attr.floats.clone())),
         7 => Some(OnnxAttribute::Ints(attr.ints.clone())),
@@ -364,6 +379,8 @@ pub mod onnx_proto {
         pub i: i64,
         #[prost(bytes = "vec", tag = "4")]
         pub s: Vec<u8>,
+        #[prost(message, optional, tag = "5")]
+        pub t: Option<TensorProto>,
         #[prost(int32, tag = "20")]
         pub r#type: i32,
         #[prost(float, repeated, packed = "false", tag = "7")]

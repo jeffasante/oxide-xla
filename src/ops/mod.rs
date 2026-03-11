@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 use crate::graph::JaxOp;
 use crate::parser::OnnxAttribute;
@@ -57,7 +57,8 @@ pub fn map_onnx_op(op_type: &str, attributes: &HashMap<String, OnnxAttribute>) -
         "Conv" => nn::map_conv(attributes),
         "ConvTranspose" => nn::map_conv_transpose(attributes),
         "MaxPool" => nn::map_maxpool(attributes),
-        "AveragePool" | "GlobalAveragePool" => nn::map_global_avg_pool(),
+        "AveragePool" => nn::map_averagepool(attributes),
+        "GlobalAveragePool" => nn::map_global_avg_pool(),
         "BatchNormalization" => nn::map_batchnorm(attributes),
         "LayerNormalization" => nn::map_layernorm(attributes),
         "Softmax" => nn::map_softmax(attributes),
@@ -86,21 +87,22 @@ pub fn map_onnx_op(op_type: &str, attributes: &HashMap<String, OnnxAttribute>) -
         "Transpose" => reshape::map_transpose(attributes),
         "Concat" => reshape::map_concat(attributes),
         "Gather" => reshape::map_gather(attributes),
+        "Split" => reshape::map_split(attributes),
+        "Slice" => reshape::map_slice(attributes),
+        "Squeeze" => reshape::map_squeeze(attributes),
+        "Unsqueeze" => reshape::map_unsqueeze(attributes),
         "Resize" => Ok(JaxOp::Resize),
         "DepthToSpace" => Ok(JaxOp::DepthToSpace),
         "Shape" => Ok(JaxOp::Shape),
         "Identity" => Ok(JaxOp::Identity),
-        "Slice" => Ok(JaxOp::Slice),
-        "Squeeze" => Ok(JaxOp::Squeeze),
-        "Unsqueeze" => Ok(JaxOp::Unsqueeze),
         "Tile" => Ok(JaxOp::Tile),
         "Expand" => Ok(JaxOp::Expand),
-        "Pad" => Ok(JaxOp::Pad { pads: vec![] }), // Pads usually come from input in newer opsets
-        "Cast" => Ok(JaxOp::Cast),
+        "Pad" => reshape::map_pad(attributes),
+        "Cast" => reshape::map_cast(attributes),
 
         // Quantization / CV Stubs
         "DynamicQuantizeLinear" => Ok(JaxOp::DynamicQuantizeLinear),
-        "Constant" => Ok(JaxOp::Constant),
+        "Constant" => reshape::map_constant(attributes),
         "Clip" => Ok(JaxOp::Clip),
 
         // Falling back to Unknown for unmapped operators

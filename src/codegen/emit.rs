@@ -8,6 +8,25 @@ use anyhow::{Result, bail};
 
 use crate::graph::{IrNode, JaxOp};
 
+/// Convert ONNX dtype code to JAX numpy dtype string.
+fn onnx_dtype_to_jnp(code: i32) -> &'static str {
+    match code {
+        1 => "jnp.float32",
+        2 => "jnp.uint8",
+        3 => "jnp.int8",
+        5 => "jnp.int16",
+        6 => "jnp.int32",
+        7 => "jnp.int64",
+        9 => "jnp.bool_",
+        10 => "jnp.float16",
+        11 => "jnp.float64",
+        12 => "jnp.uint32",
+        13 => "jnp.uint64",
+        16 => "jnp.bfloat16",
+        _ => "jnp.float32",
+    }
+}
+
 /// Emit one line of Python code for the given IR node.
 pub fn emit_node(
     node: &IrNode,
@@ -159,6 +178,19 @@ pub fn emit_node(
                 strides.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", "),
                 padding_str)
         }
+        JaxOp::AveragePool { kernel_shape, strides, pads } => {
+            // Use jax.lax.reduce_window with addition, then divide by kernel volume
+            let kh = kernel_shape.get(0).copied().unwrap_or(1);
+            let kw = kernel_shape.get(1).copied().unwrap_or(1);
+            let kernel_vol = kh * kw;
+            let padding_str = pads.chunks(2).map(|c| format!("({}, {})", c[0], c[1])).collect::<Vec<_>>().join(", ");
+            format!("{} = jax.lax.reduce_window({}, 0.0, jax.lax.add, (1, 1, {}, {}), (1, 1, {}, {}), [(0,0),(0,0),{}]) / {}",
+                output_var, input_vars[0],
+                kh, kw,
+                strides.get(0).unwrap_or(&1), strides.get(1).unwrap_or(&1),
+                padding_str,
+                kernel_vol)
+        }
         JaxOp::Softmax { axis } => format!("{} = jax.nn.softmax({}, axis={})", output_var, input_vars[0], axis),
 
         // Shape Manipulation
@@ -166,21 +198,136 @@ pub fn emit_node(
         JaxOp::Transpose { perm } => format!("{} = jnp.transpose({}, ({}))", output_var, input_vars[0], perm.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ")),
         JaxOp::Concat { axis } => format!("{} = jnp.concatenate([{}], axis={})", output_var, input_vars.join(", "), axis),
         JaxOp::Gather { axis } => format!("{} = jnp.take({}, {}, axis={})", output_var, input_vars[0], input_vars[1], axis),
-        JaxOp::Squeeze => format!("{} = jnp.squeeze({})", output_var, input_vars[0]),
-        JaxOp::Unsqueeze => format!("{} = jnp.expand_dims({}, axis=0)", output_var, input_vars[0]),
-        JaxOp::Slice => format!("{} = jax.lax.slice({}, ...) # Slice stub", output_var, input_vars[0]),
-        JaxOp::Tile => format!("{} = jnp.tile({}, ...) # Tile stub", output_var, input_vars[0]),
-        JaxOp::Expand => format!("{} = {} * jnp.ones(...) # Expand stub", output_var, input_vars[0]),
-        JaxOp::Pad { .. } => format!("{} = jnp.pad({}, ...) # Pad stub", output_var, input_vars[0]),
-        JaxOp::Cast => format!("{} = {}.astype(jnp.float32) # Cast", output_var, input_vars[0]),
+
+        // Split -> split along axis and return list, then index by output
+        JaxOp::Split { axis, num_outputs } => {
+            format!("{} = jnp.split({}, {}, axis={})", output_var, input_vars[0], num_outputs, axis)
+        }
+
+        // Squeeze with proper axes
+        JaxOp::Squeeze { axes } => {
+            if axes.is_empty() {
+                format!("{} = jnp.squeeze({})", output_var, input_vars[0])
+            } else if axes.len() == 1 {
+                format!("{} = jnp.squeeze({}, axis={})", output_var, input_vars[0], axes[0])
+            } else {
+                format!("{} = jnp.squeeze({}, axis=({}))", output_var, input_vars[0],
+                    axes.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", "))
+            }
+        }
+
+        // Unsqueeze with proper axes
+        JaxOp::Unsqueeze { axes } => {
+            if axes.is_empty() {
+                format!("{} = jnp.expand_dims({}, axis=0)", output_var, input_vars[0])
+            } else if axes.len() == 1 {
+                format!("{} = jnp.expand_dims({}, axis={})", output_var, input_vars[0], axes[0])
+            } else {
+                format!("{} = jnp.expand_dims({}, axis=({}))", output_var, input_vars[0],
+                    axes.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", "))
+            }
+        }
+
+        // Slice with full parameters
+        JaxOp::Slice { starts, ends, axes, steps } => {
+            if !starts.is_empty() && !ends.is_empty() {
+                // Build Python slice notation directly
+                let axes_str = if axes.is_empty() {
+                    (0..starts.len() as i64).collect::<Vec<_>>()
+                } else {
+                    axes.clone()
+                };
+                let steps_resolved: Vec<i64> = if steps.is_empty() {
+                    vec![1; starts.len()]
+                } else {
+                    steps.clone()
+                };
+
+                // Find max axis to know how many dimensions we need
+                let max_axis = *axes_str.iter().max().unwrap_or(&0) as usize;
+                let mut slices: Vec<String> = vec!["slice(None)".to_string(); max_axis + 1];
+                
+                for i in 0..starts.len() {
+                    let ax = axes_str[i] as usize;
+                    let end_str = if ends[i] >= i64::MAX / 2 { "None".to_string() } else { ends[i].to_string() };
+                    let step = steps_resolved.get(i).copied().unwrap_or(1);
+                    if step == 1 {
+                        slices[ax] = format!("slice({}, {})", starts[i], end_str);
+                    } else {
+                        slices[ax] = format!("slice({}, {}, {})", starts[i], end_str, step);
+                    }
+                }
+                format!("{} = {}[{}]", output_var, input_vars[0],
+                    slices.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "))
+            } else {
+                // Dynamic slicing from input tensors — emit a helper call
+                format!("{} = jax.lax.dynamic_slice({}, {}, {})",
+                    output_var, input_vars[0],
+                    input_vars.get(1).unwrap_or(&"None".to_string()),
+                    input_vars.get(3).unwrap_or(&"None".to_string()))
+            }
+        }
+
+        JaxOp::Tile => format!("{} = jnp.tile({}, {})", output_var, input_vars[0], input_vars.get(1).unwrap_or(&"None".to_string())),
+        JaxOp::Expand => format!("{} = jnp.broadcast_to({}, {})", output_var, input_vars[0], input_vars.get(1).unwrap_or(&"None".to_string())),
+
+        // Pad with proper mode and constant value
+        JaxOp::Pad { pads, mode, constant_value } => {
+            if !pads.is_empty() {
+                // ONNX pads format: [x1_begin, x2_begin, ..., x1_end, x2_end, ...]
+                let ndim = pads.len() / 2;
+                let pad_pairs: Vec<String> = (0..ndim)
+                    .map(|i| format!("({}, {})", pads[i], pads[i + ndim]))
+                    .collect();
+                let pad_str = format!("[{}]", pad_pairs.join(", "));
+                match mode.as_str() {
+                    "constant" => format!("{} = jnp.pad({}, {}, mode='constant', constant_values={})", 
+                        output_var, input_vars[0], pad_str, constant_value),
+                    "reflect" => format!("{} = jnp.pad({}, {}, mode='reflect')", 
+                        output_var, input_vars[0], pad_str),
+                    "edge" => format!("{} = jnp.pad({}, {}, mode='edge')", 
+                        output_var, input_vars[0], pad_str),
+                    _ => format!("{} = jnp.pad({}, {}, mode='constant', constant_values={})", 
+                        output_var, input_vars[0], pad_str, constant_value),
+                }
+            } else {
+                // Pads come from input tensor (opset >= 11)
+                format!("{} = jnp.pad({}, jnp.reshape({}, (-1, 2)).tolist(), mode='{}', constant_values={})",
+                    output_var, input_vars[0],
+                    input_vars.get(1).unwrap_or(&"None".to_string()),
+                    mode, constant_value)
+            }
+        }
+
+        // Cast with proper dtype
+        JaxOp::Cast { to_dtype } => {
+            let dtype_str = onnx_dtype_to_jnp(*to_dtype);
+            format!("{} = {}.astype({})", output_var, input_vars[0], dtype_str)
+        }
 
         // Metadata / Utility
-        JaxOp::Shape => format!("{} = jnp.shape({})", output_var, input_vars[0]),
+        JaxOp::Shape => format!("{} = jnp.array({}.shape)", output_var, input_vars[0]),
         JaxOp::Identity => format!("{} = {}", output_var, input_vars[0]),
-        JaxOp::Constant => format!("{} = {} # Constant", output_var, input_vars.get(0).unwrap_or(&"0.0".to_string())),
-        JaxOp::DynamicQuantizeLinear => format!("{} = {} # DynamicQuantizeLinear (Bypass)", output_var, input_vars[0]),
+
+        // Constant with actual value
+        JaxOp::Constant { value } => {
+            // Format value cleanly: avoid scientific notation for simple values
+            if *value == 0.0 {
+                format!("{} = 0.0", output_var)
+            } else if *value == 1.0 {
+                format!("{} = 1.0", output_var)
+            } else if *value == -1.0 {
+                format!("{} = -1.0", output_var)
+            } else if value.fract() == 0.0 && value.abs() < 1e15 {
+                format!("{} = {:.1}", output_var, value)
+            } else {
+                format!("{} = {}", output_var, value)
+            }
+        }
+
+        JaxOp::DynamicQuantizeLinear => format!("{} = {}", output_var, input_vars[0]),
         JaxOp::Clip => format!("{} = jnp.clip({}, {}, {})", output_var, input_vars[0], input_vars.get(1).unwrap_or(&"None".to_string()), input_vars.get(2).unwrap_or(&"None".to_string())),
-        JaxOp::Resize => format!("{} = jax.image.resize({}, ...) # Resize", output_var, input_vars[0]),
+        JaxOp::Resize => format!("{} = jax.image.resize({}, {}.shape, method='bilinear')", output_var, input_vars[0], input_vars[0]),
 
         JaxOp::DepthToSpace => format!("{} = jnp.transpose(jnp.reshape({}, (-1)), (0, 1, 2, 3)) # DepthToSpace stub", output_var, input_vars[0]),
         JaxOp::Unknown(op) => format!("{} = {} # Implementation for '{}' pending", output_var, input_vars.get(0).unwrap_or(&"None".to_string()), op),
