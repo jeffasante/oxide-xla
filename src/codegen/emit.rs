@@ -146,21 +146,31 @@ pub fn emit_node(
         // Neural Network Components
         JaxOp::Conv { strides, pads, dilations, group } => {
             let padding_str = pads.chunks(2).map(|c| format!("({}, {})", c[0], c[1])).collect::<Vec<_>>().join(", ");
-            format!("{} = jax.lax.conv_general_dilated({}, {}, window_strides=({}), padding=[{}], rhs_dilation=({}), feature_group_count={})",
-                output_var, input_vars[0], input_vars[1], 
+            let mut code = format!("jax.lax.conv_general_dilated({}, {}, window_strides=({}), padding=[{}], rhs_dilation=({}), feature_group_count={})",
+                input_vars[0], input_vars[1], 
                 strides.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", "),
                 padding_str,
                 dilations.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(", "),
-                group)
+                group);
+            
+            if input_vars.len() >= 3 {
+                code = format!("jnp.add({}, {}.reshape(1, -1, 1, 1))", code, input_vars[2]);
+            }
+            format!("{} = {}", output_var, code)
         }
         JaxOp::ConvTranspose { strides, pads, dilations, group, .. } => {
             let padding_str = pads.chunks(2).map(|c| format!("({}, {})", c[0], c[1])).collect::<Vec<_>>().join(", ");
-            format!("{} = jax.lax.conv_transpose({}, {}, strides=({}), padding=[{}], rhs_dilation=({}), feature_group_count={})",
-                output_var, input_vars[0], input_vars[1], 
+            let mut code = format!("jax.lax.conv_transpose({}, {}, strides=({}), padding=[{}], rhs_dilation=({}), feature_group_count={})",
+                input_vars[0], input_vars[1], 
                 strides.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", "),
                 padding_str,
                 dilations.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(", "),
-                group)
+                group);
+
+            if input_vars.len() >= 3 {
+                code = format!("jnp.add({}, {}.reshape(1, -1, 1, 1))", code, input_vars[2]);
+            }
+            format!("{} = {}", output_var, code)
         }
         JaxOp::BatchNorm { epsilon } => {
             format!("{} = ({} - {}.reshape(1, -1, 1, 1)) / jnp.sqrt({}.reshape(1, -1, 1, 1) + {}) * {}.reshape(1, -1, 1, 1) + {}.reshape(1, -1, 1, 1)",
@@ -172,11 +182,15 @@ pub fn emit_node(
         }
         JaxOp::MaxPool { strides, kernel_shape, pads } => {
             let padding_str = pads.chunks(2).map(|c| format!("({}, {})", c[0], c[1])).collect::<Vec<_>>().join(", ");
-            format!("{} = jax.lax.reduce_window({}, -jnp.inf, jax.lax.max, ({}), ({}), [(0,0),(0,0),{}])",
-                output_var, input_vars[0], 
-                kernel_shape.iter().map(|k| k.to_string()).collect::<Vec<_>>().join(", "),
-                strides.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", "),
-                padding_str)
+            let (ks, st) = if kernel_shape.len() == 2 {
+                (format!("(1, 1, {}, {})", kernel_shape[0], kernel_shape[1]),
+                 format!("(1, 1, {}, {})", strides[0], strides[1]))
+            } else {
+                (format!("({})", kernel_shape.iter().map(|k| k.to_string()).collect::<Vec<_>>().join(", ")),
+                 format!("({})", strides.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", ")))
+            };
+            format!("{} = jax.lax.reduce_window({}, -jnp.inf, jax.lax.max, {}, {}, [(0,0),(0,0),{}])",
+                output_var, input_vars[0], ks, st, padding_str)
         }
         JaxOp::AveragePool { kernel_shape, strides, pads } => {
             // Use jax.lax.reduce_window with addition, then divide by kernel volume

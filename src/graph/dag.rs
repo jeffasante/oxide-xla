@@ -212,7 +212,31 @@ impl IrGraph {
 
         // 3. Add operators and edges
         for node in &model.nodes {
-            let op = ops::map_onnx_op(&node.op_type, &node.attributes)?;
+            let mut op = ops::map_onnx_op(&node.op_type, &node.attributes)?;
+
+            // Special handling for operators with constant inputs (Reshape, Reduce*, Squeeze, etc.)
+            // JAX requires these to be static values when jit-compiled.
+            match &mut op {
+                JaxOp::Reshape { target_shape } if target_shape.is_empty() && node.inputs.len() >= 2 => {
+                    if let Some(init) = model.initializers.get(&node.inputs[1]) {
+                        *target_shape = extract_ints_from_init(init);
+                    }
+                }
+                JaxOp::ReduceMean { axes, .. } | JaxOp::ReduceSum { axes, .. } | 
+                JaxOp::ReduceMax { axes, .. } | JaxOp::ReduceMin { axes, .. } | 
+                JaxOp::ReduceProd { axes, .. } if axes.is_empty() && node.inputs.len() >= 2 => {
+                    if let Some(init) = model.initializers.get(&node.inputs[1]) {
+                        *axes = extract_ints_from_init(init);
+                    }
+                }
+                JaxOp::Squeeze { axes } | JaxOp::Unsqueeze { axes } if axes.is_empty() && node.inputs.len() >= 2 => {
+                    if let Some(init) = model.initializers.get(&node.inputs[1]) {
+                        *axes = extract_ints_from_init(init);
+                    }
+                }
+                _ => {}
+            }
+
             let ir_node = IrNode {
                 name: node.outputs[0].clone(),
                 op,
@@ -326,4 +350,24 @@ impl IrGraph {
         out.push_str("\n Ready for JAX generation.\n");
         out
     }
+}
+
+/// Helper to resolve static lists of integers from ONNX constant initializers.
+fn extract_ints_from_init(init: &crate::parser::OnnxTensor) -> Vec<i64> {
+    if !init.int64_data.is_empty() {
+        return init.int64_data.clone();
+    }
+    
+    // Fallback: decode raw bytes as int64.
+    if !init.raw_data.is_empty() && init.raw_data.len() % 8 == 0 {
+        let mut vals = Vec::new();
+        for chunk in init.raw_data.chunks_exact(8) {
+            let mut bytes = [0u8; 8];
+            bytes.copy_from_slice(chunk);
+            vals.push(i64::from_le_bytes(bytes));
+        }
+        return vals;
+    }
+    
+    vec![]
 }
