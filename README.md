@@ -4,6 +4,10 @@
 
 ---
 
+[**🚀 Live Demo**](https://jeffasante.github.io/oxide-xla/) | [**Operators**](Operators.md) | [**Blueprint**](BLUEPRINT.md)
+
+---
+
 ## What It Does
 
 OxideXLA reads ONNX computation graphs and emits runnable JAX Python code.
